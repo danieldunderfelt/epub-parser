@@ -5,13 +5,14 @@ import _ from 'lodash'
 import nodeZip from 'node-zip'
 import parseLink from './parseLink'
 import parseSection, { Section } from './parseSection'
-import { GeneralObject } from './types'
 
 const xmlParser = new xml2js.Parser()
 
+type GeneralObject = Record<string, unknown>
+
 const xmlToJs = (xml: string) => {
   return new Promise<any>((resolve, reject) => {
-    xmlParser.parseString(xml, (err: Error, object: GeneralObject) => {
+    xmlParser.parseString(xml, (err: Error | null, object: GeneralObject) => {
       if (err) {
         reject(err)
       } else {
@@ -39,20 +40,24 @@ const determineRoot = (opfPath: string) => {
 }
 
 const parseMetadata = (metadata: GeneralObject[]) => {
-  const title = _.get(metadata[0], ['dc:title', 0]) as string
+  let title = _.get(metadata[0], ['dc:title', 0]) as string
   let author = _.get(metadata[0], ['dc:creator', 0]) as string
 
   if (typeof author === 'object') {
     author = _.get(author, ['_']) as string
   }
 
+  if (typeof title === 'object') {
+    title = _.get(title, ['_']) as string
+  }
+
   const publisher = _.get(metadata[0], ['dc:publisher', 0]) as string
-  const meta = {
+
+  return {
     title,
     author,
     publisher,
   }
-  return meta
 }
 
 export class Epub {
@@ -62,9 +67,7 @@ export class Epub {
   private _content?: GeneralObject
   private _manifest?: any[]
   private _spine?: string[] // array of ids defined in manifest
-  private _toc?: GeneralObject
   private _metadata?: GeneralObject
-  structure?: GeneralObject
   info?: {
     title: string
     author: string
@@ -76,9 +79,7 @@ export class Epub {
     this._zip = new nodeZip(buffer, { binary: true, base64: false, checkCRC32: true })
   }
 
-  resolve(
-    path: string,
-  ): {
+  resolve(path: string): {
     asText: () => string
   } {
     let _path
@@ -103,8 +104,7 @@ export class Epub {
 
   private async _getOpfPath() {
     const container = await this._resolveXMLAsJsObject('/META-INF/container.xml')
-    const opfPath = container.container.rootfiles[0].rootfile[0]['$']['full-path']
-    return opfPath
+    return container.container.rootfiles[0].rootfile[0]['$']['full-path']
   }
 
   _getManifest(content: GeneralObject) {
@@ -123,95 +123,9 @@ export class Epub {
   }
 
   _getSpine() {
-    return _.get(this._content, ['package', 'spine', 0, 'itemref'], []).map(
-      (item: GeneralObject) => {
-        return item.$.idref
-      },
+    return _.get(this._content, ['package', 'spine', 0, 'itemref'], []).map((item: unknown) =>
+      _.get(item, ['$', 'idref']),
     )
-  }
-
-  _genStructureForHTML(tocObj: GeneralObject) {
-    const tocRoot = tocObj.html.body[0].nav[0]['ol'][0].li;
-    let runningIndex = 1;
-
-    const parseHTMLNavPoints = (navPoint: GeneralObject) => {
-      const element = navPoint.a[0] || {};
-      const path = element['$'].href;
-      let name = element['_'];
-      const prefix = element.span;
-      if (prefix) {
-        name = `${prefix.map((p: GeneralObject) => p['_']).join('')}${name}`;
-      }
-      const sectionId = this._resolveIdFromLink(path);
-      const { hash: nodeId } = parseLink(path)
-      const playOrder = runningIndex;
-
-      let children = navPoint?.ol?.[0]?.li;
-
-      if (children) {
-        children = parseOuterHTML(children);
-      }
-
-      runningIndex++;
-
-      return {
-        name,
-        sectionId,
-        nodeId,
-        path,
-        playOrder,
-        children,
-      };
-    };
-
-    const parseOuterHTML = (collection: GeneralObject[]) => {
-      return collection.map((point) => {
-        return parseHTMLNavPoints(point);
-      });
-    }
-
-    return parseOuterHTML(tocRoot);
-  }
-
-  _genStructure(tocObj: GeneralObject, resolveNodeId = false) {
-    if (tocObj.html) {
-      return this._genStructureForHTML(tocObj);
-    }
-
-    const rootNavPoints = _.get(tocObj, ['ncx', 'navMap', '0', 'navPoint'], [])
-
-    const parseNavPoint = (navPoint: GeneralObject) => {
-      // link to section
-      const path = _.get(navPoint, ['content', '0', '$', 'src'], '')
-      const name = _.get(navPoint, ['navLabel', '0', 'text', '0'])
-      const playOrder = _.get(navPoint, ['$', 'playOrder']) as string
-      const { hash: nodeId } = parseLink(path)
-      let children = navPoint.navPoint
-
-      if (children) {
-        // tslint:disable-next-line:no-use-before-declare
-        children = parseNavPoints(children)
-      }
-
-      const sectionId = this._resolveIdFromLink(path)
-
-      return {
-        name,
-        sectionId,
-        nodeId,
-        path,
-        playOrder,
-        children,
-      }
-    }
-
-    const parseNavPoints = (navPoints: GeneralObject[]) => {
-      return navPoints.map((point) => {
-        return parseNavPoint(point)
-      })
-    }
-
-    return parseNavPoints(rootNavPoints)
   }
 
   _resolveSectionsFromSpine(expand = false) {
@@ -237,16 +151,6 @@ export class Epub {
     const content = await this._resolveXMLAsJsObject('/' + opfPath)
     const manifest = this._getManifest(content)
     const metadata = _.get(content, ['package', 'metadata'], [])
-    const tocID = _.get(content, ['package', 'spine', 0, '$', 'toc'], 'toc.xhtml');
-    // https://github.com/gaoxiaoliangz/epub-parser/issues/13
-    // https://www.w3.org/publishing/epub32/epub-packages.html#sec-spine-elem
-
-    const tocPath = (_.find(manifest, { id: tocID }) || {}).href
-    if (tocPath) {
-      const toc = await this._resolveXMLAsJsObject(tocPath)
-      this._toc = toc
-      this.structure = this._genStructure(toc)
-    }
 
     this._manifest = manifest
     this._content = content

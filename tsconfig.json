@@ -1,11 +1,12 @@
 {
   "compilerOptions": {
-    "target": "es5",
+    "target": "ESNext",
     "lib": [
       "es6",
+      "esnext",
       "dom"
     ],
-    "module": "commonjs",
+    "module": "ESNext",
     "moduleResolution": "node",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
@@ -20,6 +21,7 @@
     "strict": true
   },
   "include": [
-    "src"
+    "src",
+    "test"
   ]
 }

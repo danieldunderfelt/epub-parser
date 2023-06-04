@@ -17,15 +17,6 @@ const testFile = (filename: string) => {
       expect(keys.length).not.toBe(0)
     })
 
-    test('toc', async () => {
-      const result = await fileContent
-      if (filename === 'file-1-no-toc') {
-        expect(result.structure).toBe(undefined)
-      } else {
-        expect(fileContent && typeof fileContent).toBe('object')
-      }
-    })
-
     // it('key 分别为: flesh, nav, meta', done => {
     //   const expectedKeys = ['flesh', 'nav', 'meta']
 
